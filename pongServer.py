@@ -6,8 +6,10 @@
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
+# Synchronization 
 import socket
 import threading
+import time 
 
 # Use this file to write your server logic
 # You will need to support at least two clients
@@ -16,13 +18,114 @@ import threading
 # I suggest you use the sync variable in pongClient.py to determine how out of sync your two
 # clients are and take actions to resync the games
 
+# Global Game State
+
+screenWidth = 640
+screenHeight = 480
+
 # These variables store the current state of the game that needs to be synchronized between clients
 leftPaddleY = 215    # Y position of left player's paddle (Player 1)
 rightPaddleY = 215   # Y position of right player's paddle (Player 2)
 
+# Ball state (starts in middle of screen)
+ballX = screenWidth // 2 
+ballY = screenWidth // 2
 
-# : Add ball position (ballX, ballY) and scores (leftScore, rightScore) here
-#-----------------------------------------------------------------------------------------------------------
+# Velocity in X and Y direction
+ballVX = 5 
+ballVY = 3 
+
+# Scores
+leftScore = 0
+rightScore = 0
+
+# Paddle movement flags from clients (up, down, stop)
+leftMove = "stop"
+rightMove = "stop"
+
+# Store client sockets
+leftClient = None
+rightClient = None
+
+# Prevent threads writing at same time on a global variable
+stateLock = threading.Lock()
+
+# Update ball position (ballX, ballY) and scores (leftScore, rightScore), velocities, and paddle position
+# Execute client commands 
+def game_loop():
+    global leftPaddleY, rightPaddleY
+    global leftMove, rightMove
+    global ballX, ballY, ballVX, ballVY
+    global leftScore, rightScore
+
+    FPS = 60 # frames per second
+    frame_delay = 1.0 / FPS
+
+    while True:
+        time.sleep(frame_delay)
+
+        # Update paddle movement
+        # Y coordinate STARTS at top, so going up will decrease coords, and vice versa
+        with stateLock:
+            paddle_speed = 5 # pixels per frame
+
+            # left paddle
+            if leftMove == "up":
+                leftPaddleY -= paddle_speed
+            elif leftMove == "down":
+                leftPaddleY += paddle_speed
+            
+            # right paddle
+            if rightMove == "up":
+                rightPaddleY -= paddle_speed
+            elif rightMove == "down":
+                rightPaddleY += paddle_speed
+            
+            # Keep paddles in screen bounds
+            # Can't go above 0 (top bounds), can't go below screenheight including paddle pixels of 50
+            # Worse case scenario paddle position at y is top or bottom bound (including paddle)
+            leftPaddleY = max(0, min(screenHeight - 50, leftPaddleY))
+            rightPaddleY = max(0, min(screenHeight - 50, rightPaddleY))
+
+            # Update ball position
+            ballX += ballVX
+            ballY += ballVY
+
+            # Wall colisions
+            # Reverse direction off top or bottom bound
+            if ballY <= 0 or ballY >= screenHeight:
+                ballVY *= -1
+            
+            # Left / Right Scoring
+            if ballX < 0:
+                rightScore += 1 # right scored
+                ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
+                ballVX = abs(ballVX) # serve to right 
+            if ballX > screenWidth:
+                leftScore += 1 # left scored
+                ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
+                ballVX = -abs(ballVX) # serve to left
+            
+            # Paddle collisions
+            paddle_width = 10
+            paddle_height = 50
+
+            leftPaddleX = 20 # left edge of paddle 
+            rightPaddleX = screenWidth - 20 - paddle_width # not totally against wall 
+
+            # Is ball touching at the paddle x coordinate including its width and is it within the screen bounds
+            # collision with left paddle
+            if (ballX <= leftPaddleX + paddle_width and 
+                leftPaddleY <= ballY <= leftPaddleY + paddle_height):
+                ballVX = abs(ballVX) # bounce ball back in opposite direction
+            
+            # collision with right paddle
+            if (ballX >= rightPaddleX - paddle_width and
+                rightPaddleY <= ballY <= rightPaddleY + paddle_height):
+                ballVX = -abs(ballVX) # bounce ball back in opposite direction
+
+
+
 
 #Handles communcation witht he left player
 #updates leftpaddle based on the data and sends to rightpaddle
@@ -61,31 +164,32 @@ def handleRightClient(client_socket):
     client_socket.close()
 
 # Server set up
-# Create a TCP/IP socket
-# AF_INET = IPv4, SOCK_STREAM = TCP (reliable, connection-oriented)
-server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-# Bind the socket to port 12345 on all available network interfaces
-# '' means listen on all interfaces (localhost, network IP, etc.)
-server.bind(("",12345))
-# start listening for connection
-# 2 == alow up to connection 
-server.listen(2)
-print("Waiting for players...")
-#accpt first client connection (P1 - Left Paddle)
-client1,addr1 = server.accept()
-print(f"Player 1 connected from {addr1}")
-#accpt first client connection (P2 - Right Paddle)
+def start_server():
+    # Create a TCP/IP socket
+    # AF_INET = IPv4, SOCK_STREAM = TCP (reliable, connection-oriented)
+    server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    # Bind the socket to port 12345 on all available network interfaces
+    # '' means listen on all interfaces (localhost, network IP, etc.)
+    server.bind(("",12345))
+    # start listening for connection
+    # 2 == alow up to connection 
+    server.listen(2)
+    print("Waiting for players...")
+    #accpt first client connection (P1 - Left Paddle)
+    client1,addr1 = server.accept()
+    print(f"Player 1 connected from {addr1}")
+    #accpt first client connection (P2 - Right Paddle)
 
-client2, addr2 = server.accept()
-print(f"Player 2 connected from {addr2}")
+    client2, addr2 = server.accept()
+    print(f"Player 2 connected from {addr2}")
 
-# Create a thread to handle Player 1
-# target = function to run
-# .start() begins running the thread (doesn't wait for it to finish)
-threading.Thread(target=handleLeftClient,args=(client1,)).start()
+    # Create a thread to handle Player 1
+    # target = function to run
+    # .start() begins running the thread (doesn't wait for it to finish)
+    threading.Thread(target=handleLeftClient,args=(client1,)).start()
 
-# Create a thread to handle Player 2
-# Both threads now run simultaneously, each handling their own client
-threading.Thread(target=handleRightClient,args=(client2,)).start()
+    # Create a thread to handle Player 2
+    # Both threads now run simultaneously, each handling their own client
+    threading.Thread(target=handleRightClient,args=(client2,)).start()
 
 
