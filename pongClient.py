@@ -1,8 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    <Anyone who touched the code>
-# Email Addresses:          <Your uky.edu email addresses>
-# Date:                     <The date the file was last edited>
-# Purpose:                  <How this file contributes to the project>
+# Contributing Authors:	    Nathan Garrison
+# Email Addresses:          nathan.garrison@uky.edu
+# Date:                     11/19/2025
+# Purpose:                  This script is the client for a multiplayer pong game that connects to a server.
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
@@ -84,6 +84,8 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # where the ball is and the current score.
         # Feel free to change when the score is updated to suit your needs/requirements
         
+        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
+        client.send(message.encode())
         
         # =========================================================================================
 
@@ -156,6 +158,16 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # Send your server update here at the end of the game loop to sync your game with your
         # opponent's game
 
+        data = client.recv(1024).decode()
+        if data:
+            oppPaddleY, ballX, ballY, leftScore, rightScore, syncNum = client.recv(1024).decode().split(",")
+            opponentPaddleObj.rect.y = int(oppPaddleY)
+            ball.rect.x = int(ballX)
+            ball.rect.y = int(ballY)
+            lScore = int(leftScore)
+            rScore = int(rightScore)
+            sync = int(syncNum)
+
         # =========================================================================================
 
 
@@ -176,9 +188,13 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     # Create a socket and connect to the server
     # You don't have to use SOCK_STREAM, use what you think is best
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
+    client.connect((ip, int(port)))
+    
     # Get the required information from your server (screen width, height & player paddle, "left or "right)
-
+    info = client.recv(1024).decode()
+    screenWidth, screenHeight, paddleSide = info.split(",")
+    screenWidth = int(screenWidth)
+    screenHeight = int(screenHeight)
 
     # If you have messages you'd like to show the user use the errorLabel widget like so
     errorLabel.config(text=f"Some update text. You input: IP: {ip}, Port: {port}")
@@ -186,9 +202,9 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     errorLabel.update()     
 
     # Close this window and start the game with the info passed to you from the server
-    #app.withdraw()     # Hides the window (we'll kill it later)
-    #playGame(screenWidth, screenHeight, ("left"|"right"), client)  # User will be either left or right paddle
-    #app.quit()         # Kills the window
+    app.withdraw()     # Hides the window (we'll kill it later)
+    playGame(screenWidth, screenHeight, ("left"|"right"), client)  # User will be either left or right paddle
+    app.quit()         # Kills the window
 
 
 # This displays the opening screen, you don't need to edit this (but may if you like)
