@@ -46,9 +46,13 @@ rightMove = "stop"
 # Store client sockets
 leftClient = None
 rightClient = None
+# All connected client sockets (2 players + any spectators)
+clients = []
 
 # Prevent threads writing at same time on a global variable
 stateLock = threading.Lock()
+
+game_running = True # Used to accept extra clients
 
 # Update ball position (ballX, ballY) and scores (leftScore, rightScore), velocities, and paddle position
 # Execute client commands 
@@ -61,7 +65,7 @@ def game_loop():
     FPS = 60 # frames per second
     frame_delay = 1.0 / FPS
 
-    while True:
+    while game_running:
         time.sleep(frame_delay)
 
         # Update paddle movement
@@ -123,6 +127,37 @@ def game_loop():
             if (ballX >= rightPaddleX - paddle_width and
                 rightPaddleY <= ballY <= rightPaddleY + paddle_height):
                 ballVX = -abs(ballVX) # bounce ball back in opposite direction
+            
+            # make a string of the current game state
+            state_msg = (
+                f"LPad={leftPaddleY} RPad={rightPaddleY}"
+                f"BallX={ballX} BallY={ballY} VX={ballVX} VY={ballVY}"
+                f"LScore={leftScore} RScore={rightScore}"
+            )
+
+            # update both clients on encoded game state, if clients exist
+            try:
+                # make copy of all sockets, used to remove dead sockets
+                with stateLock:
+                    current_clients = list(clients)
+                
+                # remove dead sockets
+                for c in current_clients:
+                    # if send successful, then connection is alive
+                    try:
+                        c.sendall(state_msg.encode())
+                    except Exception:
+                        # remove dead client
+                        with stateLock:
+                            if c in clients:
+                                clients.remove(c)
+                        c.close()
+                        print("Removed a disconnected client")
+            except Exception as e:
+                print("Error broadcasting state: ", e)
+                game_running = False
+                break
+                                           
 
 
 
@@ -131,57 +166,61 @@ def game_loop():
 #updates leftpaddle based on the data and sends to rightpaddle
 
 def handleLeftClient(client_socket):
-    global leftPaddleY, rightPaddleY
-    while True:
-        try:
+    global leftMove, game_running
+    try:
+        # if something fails, make game stop by setting to false
+        while game_running:
             #receives position from left player
-            data = client_socket.recv(1024).decode()
+            data = client_socket.recv(1024)
             #disconnect if not recieved
             if not data:
+                game_running = False
                 break
-                #update the left paddle's position
-            leftPaddleY = int(data)
-                #send to right paddle position
-                #conver to string 
-            client_socket.send(str(rightPaddleY).encode())
-        except:
-            break
-        #close when done 
-    client_socket.close()
-
+            #update the left paddle's position
+            leftMove = data.decode().strip()
+    except:
+        game_running = False
+    finally:
+        client_socket.close()
+    
 def handleRightClient(client_socket):
-    global leftPaddleY, rightPaddleY
-    while True:
-        try:
-            data= client_socket.recv(1024).decode()
+    global rightMove, game_running
+    try:
+        # if something fails, make game stop by setting to false
+        while game_running:
+            #receives position from left player
+            data = client_socket.recv(1024)
+            #disconnect if not recieved
             if not data:
+                game_running = False
                 break
-            rightPaddleY = int(data)
-
-            client_socket.send(str(leftPaddleY).encode())
-        except:
-            break
-    client_socket.close()
+            #update the left paddle's position
+            rightMove = data.decode().strip()
+    except:
+        game_running = False
+    finally:
+        client_socket.close()
 
 # Server set up
 def start_server():
+    global leftClient, rightClient, clients
     # Create a TCP/IP socket
     # AF_INET = IPv4, SOCK_STREAM = TCP (reliable, connection-oriented)
     server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     # Bind the socket to port 12345 on all available network interfaces
     # '' means listen on all interfaces (localhost, network IP, etc.)
     server.bind(("",12345))
-    # start listening for connection
-    # 2 == alow up to connection 
-    server.listen(2)
+    # start listening for connection (any number of connections)
+    server.listen()
     print("Waiting for players...")
     #accpt first client connection (P1 - Left Paddle)
     client1,addr1 = server.accept()
     print(f"Player 1 connected from {addr1}")
-    #accpt first client connection (P2 - Right Paddle)
+    clients.append(client1)
 
     client2, addr2 = server.accept()
     print(f"Player 2 connected from {addr2}")
+    clients.append(client2)
 
     # Create a thread to handle Player 1
     # target = function to run
@@ -191,5 +230,29 @@ def start_server():
     # Create a thread to handle Player 2
     # Both threads now run simultaneously, each handling their own client
     threading.Thread(target=handleRightClient,args=(client2,)).start()
+
+    # Start authoritative game loop
+    # daemon automatically stops program when threads exit
+    threading.Thread(target=game_loop, daemon=True).start() 
+
+    # accept extra clients (spectators) in the background
+    threading.Thread(target=accept_extra_clients, args=(server,), daemon=True).start()
+
+    print("Game loop started, accepting extra spectators")
+
+def accept_extra_clients(server_socket):
+    global clients, game_running
+
+    while game_running:
+        try:
+            extra_client, extra_addr = server_socket.accept()
+            # lock state so clients aren't manipulated by multiple threads
+            with stateLock:
+                clients.append(extra_client)
+            print("Extra client connected from ", extra_addr)
+        
+        except Exception as e:
+            print(f"Error accepting extra client: {e}")
+            break
 
 
