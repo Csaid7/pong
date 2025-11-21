@@ -20,6 +20,14 @@ import time
 
 # Global Game State
 
+WIN_SCORE = 5 # points needed to win one game
+
+game_over = False # true when someone reaches WIN_SCORE
+winner = None # assign whoever reachs WIN_SCORE
+
+leftWantsReplay = False
+rightWantsReplay = False
+
 screenWidth = 640
 screenHeight = 480
 
@@ -66,6 +74,65 @@ def game_loop():
     frame_delay = 1.0 / FPS
 
     while game_running:
+
+        # Game over when someones reaches win score
+        # Send game over message to all clients 
+        if game_over:
+            state_msg = f"GAME_OVER Winner={winner}"
+        
+        # Both players want to play again
+        if leftWantsReplay and rightWantsReplay:
+            # Reset game state
+            leftScore = 0
+            rightScore = 0
+
+            # Reset paddles
+            leftPaddleY = screenHeight // 2
+            rightPaddleY = screenHeight // 2
+
+            # Reset ball
+            ballX = screenWidth // 2
+            ballY = screenHeight // 2
+            ballVX = 5
+            ballVY = 3
+
+            # Reset replay flags
+            leftWantsReplay = False
+            rightWantsReplay = False
+
+            # Clear game over flag and reset winner
+            game_over = False
+            winner = None
+
+            print("Restarting game...")
+
+            # Slight transition
+            time.sleep(0.5)
+
+        
+        try:
+            # send to all connected clients
+            with stateLock:
+                current_clients = list(clients)
+            
+            # remove dead sockets
+            for c in current_clients:
+                # if send successful, then connection is alive
+                try:
+                    c.sendall(state_msg.encode())
+                except Exception:
+                    # remove dead client
+                    with stateLock:
+                        if c in clients:
+                            clients.remove(c)
+
+                    c.close()
+        
+        except Exception as e:
+            print("Error sending GAME_OVER: ", e)
+            game_running = False
+            break
+
         time.sleep(frame_delay)
 
         # Update paddle movement
@@ -105,10 +172,20 @@ def game_loop():
                 rightScore += 1 # right scored
                 ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
                 ballVX = abs(ballVX) # serve to right 
+
+                # Check win condition
+                if rightScore >= WIN_SCORE: # Case: score quickly after WIN_SCORE (>=)
+                    game_over = True
+                    winner = "Right"
+
             if ballX > screenWidth:
                 leftScore += 1 # left scored
                 ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
                 ballVX = -abs(ballVX) # serve to left
+
+                if leftScore >= WIN_SCORE:
+                    game_over = True
+                    winner = "Left"
             
             # Paddle collisions
             paddle_width = 10
@@ -178,6 +255,12 @@ def handleLeftClient(client_socket):
                 break
             #update the left paddle's position
             leftMove = data.decode().strip()
+
+            # game has ended, left player wants to play again
+            if leftMove == "PLAY_AGAIN":
+                leftWantsReplay = True
+                print("Left player wants to play again")
+                continue
     except:
         game_running = False
     finally:
@@ -196,6 +279,12 @@ def handleRightClient(client_socket):
                 break
             #update the left paddle's position
             rightMove = data.decode().strip()
+
+            # game has ended, right player wants to play again
+            if rightMove == "PLAY_AGAIN":
+                rightWantsReplay = True
+                print("Right player wants to play again")
+                continue
     except:
         game_running = False
     finally:
