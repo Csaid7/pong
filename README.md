@@ -15,9 +15,13 @@ Github Link: https://github.com/Csaid7/pong
 General Info
 ============
 
-Run `python pongServer.py` on the host device. This sets the server to listen on any IP address on port 5555.
+1. Run `python pongServer.py` on the host device. 
 
-Run `python pongClient.py` on the client devices. The first client will be the left client and will freeze the TKinter start screen until the second client joins as the right client. Any further clients that join will be regarded as spectators.
+This sets the server to listen on any IP address on port 5555.
+
+2. Run `python pongClient.py` on the client devices. 
+
+Enter the server device's IP address and port 5555. The first client will be the left client and will freeze the TKinter start screen until the second client joins as the right client. Once both clients join, pygame screens will open and game will start. Any further clients that join will be regarded as spectators.
 
 Install Instructions
 ====================
