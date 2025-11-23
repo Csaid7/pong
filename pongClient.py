@@ -222,7 +222,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                         rScore = int(rightScore)
                         sync = int(syncNum)
 
-                    except ValueError:
+                    except:
                         pass
 
         except BlockingIOError:
