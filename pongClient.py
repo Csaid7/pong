@@ -57,14 +57,22 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
     ball = Ball(pygame.Rect(screenWidth/2, screenHeight/2, 5, 5), -5, 0)
 
+    # Determine which paddle is the player and which is the opponent
     if playerPaddle == "left":
         opponentPaddleObj = rightPaddle
         playerPaddleObj = leftPaddle
-    else:
+    elif playerPaddle == 'right':
         opponentPaddleObj = leftPaddle
         playerPaddleObj = rightPaddle
+    else:
+        # Spectator mode, no paddle control, set dummy paddles so code doesn't break
+        opponentPaddleObj = Paddle(pygame.Rect(0,0,0,0))
+        playerPaddleObj = Paddle(pygame.Rect(0,0,0,0))
 
+    # Buffer for incoming data
     recv_buffer = ''
+
+    # Set socket to non-blocking mode
     client.setblocking(False)
 
     while True:
@@ -91,8 +99,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # where the ball is and the current score.
         # Feel free to change when the score is updated to suit your needs/requirements
         
-        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
-        client.send(message.encode())
+        # Had to write message to be sent after ball logic to ensure ball starts moving first
         
         # =========================================================================================
 
@@ -105,6 +112,9 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 if paddle.rect.topleft[1] > 10:
                     paddle.rect.y -= paddle.speed
 
+        for paddle in [leftPaddle, rightPaddle]:
+            pygame.draw.rect(screen, WHITE, paddle)
+
         # If the game is over, display the win message
         if lScore > 4 or rScore > 4:
             winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
@@ -112,6 +122,9 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             textRect = textSurface.get_rect()
             textRect.center = ((screenWidth/2), screenHeight/2)
             winMessage = screen.blit(textSurface, textRect)
+
+            # Stop all movement
+            playerPaddleObj.moving = ""
         else:
 
             # ==== Ball Logic =====================================================================
@@ -142,6 +155,10 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             
             pygame.draw.rect(screen, WHITE, ball)
             # ==== End Ball Logic =================================================================
+
+        # Send client's update to the server here
+        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
+        client.send(message.encode())
 
         # Drawing the dotted line in the center
         for i in centerLine:
@@ -187,13 +204,19 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                         continue
 
                     try:
+
                         # Parse the message from the server
-                        oppPaddleY, ballX, ballY, leftScore, rightScore, syncNum = msg.split(",")
+                        if playerPaddle == 'left' or playerPaddle == 'right':
+                            oppPaddleY, ballX, ballY, leftScore, rightScore, syncNum = msg.split(",")
+                            opponentPaddleObj.rect.y = int(oppPaddleY)
+                        else:
+                            leftY, rightY, ballX, ballY, leftScore, rightScore, syncNum = msg.split(",")
                         
                         # Update opponent paddle, ball position, and scores
-                        # If player is a spectator, oppPaddleY will be -1
-                        if int(oppPaddleY) >= 0:
-                            opponentPaddleObj.rect.y = int(oppPaddleY)
+                        # If player is a spectator, set left/right paddle positions
+                        if playerPaddle not in ['left', 'right']:
+                            leftPaddle.rect.y = int(leftY)
+                            rightPaddle.rect.y = int(rightY)
                         ball.rect.x = int(ballX)
                         ball.rect.y = int(ballY)
                         lScore = int(leftScore)
@@ -237,11 +260,12 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     screenWidth = None
     screenHeight = None
     paddleSide = None
+    gameStarted = False
     buffer = ''
 
     client.setblocking(True)
 
-    while screenWidth is None or screenHeight is None or paddleSide is None:
+    while not gameStarted:
         
         # Receive data from the server
         data = client.recv(1024).decode()
@@ -266,6 +290,7 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
 
             # Parse the message from the server
             if msg == "START":
+                gameStarted = True
                 print("Game starting.")
             elif "," in msg:
                 try:

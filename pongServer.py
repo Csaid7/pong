@@ -28,24 +28,29 @@ rightPaddleY = 215   # Y position of right player's paddle (Player 2)
 
 # Ball state (starts in middle of screen)
 ballX = screenWidth // 2 
-ballY = screenWidth // 2
+ballY = screenHeight // 2
 
 # Scores
-leftScore = 0
-rightScore = 0
+lScore = 0
+rScore = 0
 
 # Sync variable to track game state updates
 sync = 0
 
 # Store all connected client sockets (2 players + any spectators)
 clients = []
+client_sides = {}
 
 # Prevent threads writing at same time on a global variable
 stateLock = threading.Lock()
 
+# Game running flag
 game_running = False
 
+# Store paddle positions
 paddles = {}
+
+
 
 # Broadcast updates to all clients
 def broadcast_state() -> None:
@@ -58,26 +63,32 @@ def broadcast_state() -> None:
         # Iterate through all connected clients
         for client_socket, side in clients:
 
-            # Determine opponent paddle position for each player
-            if side == 'left':
-                oppPaddleY = paddles.get('right', screenHeight // 2 - 25)
-
-            elif side == 'right':
-                oppPaddleY = paddles.get('left', screenHeight // 2 - 25)
-
-            else:
-                oppPaddleY = -1  # Spectators don't have paddles or opponent paddles
-
-            # Create message to send    
-            message = f'{oppPaddleY},{ballX},{ballY},{lScore},{rScore},{sync};'
-
-            # Send message to client
             try:
+
+                # Determine opponent paddle position for each player
+                if side == 'left':
+                    oppPaddleY = paddles.get('right', screenHeight // 2 - 25)
+                    message = f'{oppPaddleY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                elif side == 'right':
+                    oppPaddleY = paddles.get('left', screenHeight // 2 - 25)
+                    message = f'{oppPaddleY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                # Spectators get both paddle positions but can't control either,
+                # sends a special message to spectator clients
+                elif side == 'spectator':
+                    leftY = paddles.get('left', screenHeight // 2 - 25)
+                    rightY = paddles.get('right', screenHeight // 2 - 25)
+                    message = f'{leftY},{rightY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                # Send message to client
                 client_socket.send(message.encode())
 
             # If sending fails, skip this client
             except:
                 continue
+
+
 
 # Handle individual client connection
 def handle_client(client_socket: socket.socket, player_side: str) -> None:
@@ -109,18 +120,23 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
             # Update game state
             with stateLock:
+
+                # Update this player's paddle position
                 paddles[player_side] = paddleY
 
-                # Update ball and scores if client is more in sync
-                if clientSync >= sync:
-                    ballX = clientBallX
-                    ballY = clientBallY
-                    lScore = clientLScore
-                    rScore = clientRScore
-                    sync = clientSync
+                # Issues with desync if right client has higher sync, so only
+                # left client updates ball position and scores and right side just follows
+                if player_side == 'left':
+                    if clientSync >= sync:
+                        ballX = clientBallX
+                        ballY = clientBallY
+                        lScore = clientLScore
+                        rScore = clientRScore
+                        sync = clientSync
 
-                if lScore > 4 or rScore > 4:
-                    reset_game()
+                    # Check for game over condition
+                    if lScore > 4 or rScore > 4:
+                        game_running = False
 
             # Broadcast updated state to all clients
             broadcast_state()
@@ -144,6 +160,7 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
             paddles.pop(player_side, None)
 
 
+
 # Server set up
 def start_server(host: str, port: int) -> None:
 
@@ -155,46 +172,56 @@ def start_server(host: str, port: int) -> None:
     server_socket.listen(5)
     print(f'Server listening on IP: {host} and Port: {port}')
 
-    # Accept clients
-    player_counter = 0
-
     while True:
 
         # Accept new client connection
         client_socket, addr = server_socket.accept()
-        player_side = 'left' if player_counter == 0 else 'right' if player_counter == 1 else 'spectator'
-        print(f"Client connected from {addr} as {player_side}")
+        if len(clients) == 0:
+            side = 'left' 
+        elif len(clients) == 1:
+            side = 'right'
+        else:
+            side = 'spectator'
 
-        # Store client socket and side
-        clients.append((client_socket, player_side))
-        player_counter += 1
+        # Send initial game state to client
+        client_socket.sendall(f'{screenWidth},{screenHeight},{side};'.encode())
+        clients.append((client_socket, side))
+        print(f"Client connected from {addr} as {side}")
         
-        # Notify when two players are connected
-        if not game_running and len(clients) >= 2:
-            print("Two players connected. Game can start.")
-            game_running = True
-            for client_socket, side in clients:
-                client_socket.sendall("START;\n".encode())
-        
-        # Send initial game settings to client
-        client_socket.send(f'{screenWidth},{screenHeight},{player_side};'.encode())
+        # Check if we can start the game
+        if not game_running:
+
+            # Check if both players are connected
+            player_sides = [s for _, s in clients]
+            if 'left' in player_sides and 'right' in player_sides:
+
+                # Both players connected, start the game
+                print("Two players connected. Game can start.")
+                game_running = True
+                for c, _ in clients:
+                    c.sendall("START;\n".encode())
 
         # Start thread to handle this client
         threading.Thread(
             target = handle_client, 
-            args = (client_socket, player_side), 
+            args = (client_socket, side), 
             daemon = True
         ).start()
 
+
+
+# Reset game state for new round
 def reset_game() -> None:
-    global ballX, ballY, lScore, rScore, sync
+
+    global ballX, ballY, sync
+
+    # Reset ball position and sync for new round
     ballX = screenWidth // 2
     ballY = screenHeight // 2
-    lScore = 0
-    rScore = 0
     sync = 0
-    print("Game reset.")
+    print("Game reset for next round.")
 
-
+# Run server code listening on all IPs and port 5555 on startup
 if __name__ == "__main__":
+
     start_server(host = '', port = 5555)
