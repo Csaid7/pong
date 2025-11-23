@@ -16,6 +16,7 @@ General Info
 ============
 
 Run `python pongServer.py` on the host device. This sets the server to listen on any IP address on port 5555.
+
 Run `python pongClient.py` on the client devices. The first client will be the left client and will freeze the TKinter start screen until the second client joins as the right client. Any further clients that join will be regarded as spectators.
 
 Install Instructions
