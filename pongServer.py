@@ -11,6 +11,10 @@ import socket
 import threading
 import time 
 
+# Leaderboard
+import http.server
+import socketserver
+
 # Use this file to write your server logic
 # You will need to support at least two clients
 # You will need to keep track of where on the screen (x,y coordinates) each paddle is, the score 
@@ -47,6 +51,24 @@ game_running = False
 
 paddles = {}
 
+# Map player initials to total wins
+leaderboard = {}
+
+leaderboard_lock = threading.lock()
+
+# Replace with real client initials soon
+player_initials = {
+    "left": "P1",
+    "right": "P2"
+}
+
+# Increment win count for specific user
+def record_win(initials: str) -> None:
+    
+    with leaderboard_lock:
+        leaderboard[initials] = leaderboard.get(initials, 0) + 1 # increment count or zero 
+        print(f"Recorded win for {initials}: {leaderboard[initials]} total")
+
 # Broadcast updates to all clients
 def broadcast_state() -> None:
     
@@ -82,7 +104,7 @@ def broadcast_state() -> None:
 # Handle individual client connection
 def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
-    global paddles, ballX, ballY, lScore, rScore, sync, game_running
+    global paddles, ballX, ballY, lScore, rScore, sync, game_running, player_initials
 
     # Initialize paddle position for this player
     paddles[player_side] = screenHeight // 2 - 25
@@ -97,6 +119,17 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
             # If no data, client has disconnected
             if not data:
                 break
+            
+            if data.startswith("INITIALS:"):
+                initials = data.split(":", 1)[1].strip()
+
+                # Store initials for player side
+                with leaderboard_lock:
+                    player_initials[player_side] = initials
+                    print(f"Player on side {player_side} set initials to {initials}")
+                
+                # Wait for normal game updates
+                continue
 
             # Parse received data
             paddleY, clientBallX, clientBallY, clientLScore, clientRScore, clientSync = data.split(',')
@@ -120,6 +153,14 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
                     sync = clientSync
 
                 if lScore > 4 or rScore > 4:
+                    # Determine winner
+                    winner_side = "left" if lScore > rScore else "right"
+
+                    # Look up initials and record win
+                    # If initials missing, just have initials be winning side
+                    initials = player_initials.get(winner_side, winner_side)
+                    record_win(initials)
+
                     reset_game()
 
             # Broadcast updated state to all clients
@@ -146,6 +187,12 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
 # Server set up
 def start_server(host: str, port: int) -> None:
+    print("Starting server on port ", port) # specify server port to users
+    
+    # Start HTTP leaderboard server on port 80 using seperate thread
+    threading.Thread(target=start_http_server, daemon=True).start() # close thread when main server stops
+    print("Leaderboard HTTP server running on port 80.")
+
 
     global clients, game_running
 
@@ -194,6 +241,44 @@ def reset_game() -> None:
     rScore = 0
     sync = 0
     print("Game reset.")
+
+class LeaderboardHandler(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:
+        # Build HTML table from leaderboard dict
+        with leaderboard_lock:
+            rows = "".join(
+                f"<tr><td>{initials}</td><td>{wins}</td></tr>"
+                for initials, wins in leaderboard.items()
+            )
+        
+        # Build the web content with the rows
+        html = f"""
+        <html>
+        <head><title>Pong Leaderboard</title></head>
+        <body>
+            <h1>Pong Leaderboard</h1>
+            <table border="1" cellpadding="6">
+                <tr><th>Player</th><th>Wins</th></tr>
+                {rows}
+            </table>
+        </body>
+        </html>
+        """
+        
+        # Send to browser
+        self.send_response(200) # specifies completeness
+        self.send_header("Content-type", "text/html") # send html header
+        self.end_headers()
+        self.wfile.write(html.encode()) # Send html body bytes
+
+def start_http_server():
+    http_port = 80 # default web browser
+
+    # bind LANs to port 80 + use leaderboard class to start TCP browser
+    httpd = socketserver.TCPServer(("", http_port), LeaderboardHandler) 
+    print(f"HTTP leaderboard available at port {http_port}")
+    httpd.serve_forever() # run within thread
+ 
 
 
 if __name__ == "__main__":

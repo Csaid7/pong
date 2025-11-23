@@ -27,6 +27,12 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
     rScore = 0
     sync = 0
 
+    # Track if current game has ended
+    game_over = False
+
+    # Track if player wants to play again
+    requested_replay = False
+
     # Pygame inits
     pygame.mixer.pre_init(44100, -16, 2, 2048)
     pygame.init()
@@ -77,11 +83,18 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_DOWN:
-                    playerPaddleObj.moving = "down"
+                # If game over, listen for play again (p key)
+                if game_over and event.key == pygame.K_p and not requested_replay:
+                    requested_replay = True # player pressed p
+                    print("Play again requested by this player")
 
-                elif event.key == pygame.K_UP:
-                    playerPaddleObj.moving = "up"
+                # Else, then move paddle like normal
+                elif not game_over:
+                    if event.key == pygame.K_DOWN:
+                        playerPaddleObj.moving = "down"
+
+                    elif event.key == pygame.K_UP:
+                        playerPaddleObj.moving = "up"
 
             elif event.type == pygame.KEYUP:
                 playerPaddleObj.moving = ""
@@ -105,9 +118,16 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 if paddle.rect.topleft[1] > 10:
                     paddle.rect.y -= paddle.speed
 
-        # If the game is over, display the win message
-        if lScore > 4 or rScore > 4:
+        # If score limit is reached, game over
+        if not game_over and (lScore > 4 or rScore > 4):
+            game_over = True # Used to stop ball movement
+        
+        # Show win message every frame while game is over
+        if game_over:
+            # Display who won and if players want to play again
             winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
+            winText += "    Press P to play again"
+
             textSurface = winFont.render(winText, False, WHITE, (0,0,0))
             textRect = textSurface.get_rect()
             textRect.center = ((screenWidth/2), screenHeight/2)
@@ -155,6 +175,28 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         pygame.draw.rect(screen, WHITE, bottomWall)
         scoreRect = updateScore(lScore, rScore, screen, WHITE, scoreFont)
         pygame.display.update()
+
+        if game_over and requested_replay:
+            # Reset scores
+            lScore = 0
+            rScore = 0
+
+            # Reset paddles to starting position
+            playerPaddleObj.rect.y = paddleStartPosY
+            opponentPaddleObj.rect.y = paddleStartPosY
+
+            # Reset ball to center and serve left
+            ball.reset(nowGoing="left")
+
+            # Reset sync counter
+            sync = 0
+
+            # Reset flags
+            game_over = False
+            requested_replay = False
+
+            print("Starting new round")
+
         clock.tick(60)
         
         # This number should be synchronized between you and your opponent.  If your number is larger
@@ -224,9 +266,16 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     
     # Create a socket and connect to the server
     # You don't have to use SOCK_STREAM, use what you think is best
+
+    # Ask for initials
+    initials = input("Enter your initials: ").strip().upper()
+
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client.connect((ip, int(port)))
+
+        client.sendall(f"INITIALS: {initials}\n".encode()) # send initials
+        
     except Exception as e:
         errorLabel.config(text=f"Could not connect to server at {ip}:{port}. Error: {e}")
         errorLabel.update()
