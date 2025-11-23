@@ -1,9 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    Caleb Mpungu
-# Email Addresses:          smp222@uky.edu
-# Date:                     11/19/2025
+# Contributing Authors:	    Caleb Mpungu, Naman Rao, Nathan Garrison
+# Email Addresses:          smp222@uky.edu, naman.rao@uky.edu, nathan.garrison@uky.edu
+# Date:                     11/23/2025
 # Purpose:                 Server that manages multiplayer pong game between two clients
-# Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
 # Synchronization 
