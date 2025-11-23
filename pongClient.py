@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors:	    Nathan Garrison
 # Email Addresses:          nathan.garrison@uky.edu
-# Date:                     11/19/2025
+# Date:                     11/23/2025
 # Purpose:                  This script is the client for a multiplayer pong game that connects to a server.
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
