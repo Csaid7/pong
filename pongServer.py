@@ -10,6 +10,55 @@ import socket
 import threading
 import time 
 
+import json
+import os
+
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
+
+class LeaderboardHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        lb = load_leaderboard()
+
+        html = "<html><body style='font-family: monospace; background: black; color: white;'>"
+        html += "<h1>Pong Leaderboard</h1><pre>"
+
+        if not lb:
+            html += "No wins recorded yet."
+        else:
+            for name, wins in lb.items():
+                html += f"{name}: {wins} wins\n"
+
+        html += "</pre></body></html>"
+
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(html.encode())
+
+def start_leaderboard_server():
+    server = HTTPServer(("0.0.0.0", 80), LeaderboardHandler)
+    print("Leaderboard HTTP server running on port 80...")
+    server.serve_forever()
+
+# Start leaderboard server in background thread
+threading.Thread(target=start_leaderboard_server, daemon=True).start()
+
+LEADERBOARD_FILE = "leaderboard.json"
+
+def load_leaderboard():
+    if not os.path.exists(LEADERBOARD_FILE):
+        return {}
+    try:
+        with open(LEADERBOARD_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {}
+
+def save_leaderboard(lb):
+    with open(LEADERBOARD_FILE, "w") as f:
+        json.dump(lb, f, indent=4)
+
 # Use this file to write your server logic
 # You will need to support at least two clients
 # You will need to keep track of where on the screen (x,y coordinates) each paddle is, the score 
@@ -20,6 +69,13 @@ import time
 # Global Game State
 screenWidth = 640
 screenHeight = 480
+
+winner_recorded = False
+
+player_initials = {
+    "left": "",
+    "right": ""
+}
 
 # These variables store the current state of the game that needs to be synchronized between clients
 leftPaddleY = 215    # Y position of left player's paddle (Player 1)
@@ -46,8 +102,19 @@ stateLock = threading.Lock()
 # Game running flag
 game_running = False
 
+game_finished = False
+
+
 # Store paddle positions
 paddles = {}
+
+leaderboard = {}          # initials -> wins
+leaderboard_lock = threading.Lock()
+
+def record_win(initials: str) -> None:
+    with leaderboard_lock:
+        leaderboard[initials] = leaderboard.get(initials, 0) + 1
+    print(f"Leaderboard: {initials} now has {leaderboard[initials]} wins")
 
 
 
@@ -92,7 +159,10 @@ def broadcast_state() -> None:
 # Handle individual client connection
 def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
-    global paddles, ballX, ballY, lScore, rScore, sync, game_running
+    global paddles, ballX, ballY, lScore, rScore, sync, game_running, winner_recorded, player_initials
+
+    with stateLock:
+        player_initials[player_side] = ""
 
     # Initialize paddle position for this player
     paddles[player_side] = screenHeight // 2 - 25
@@ -107,7 +177,15 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
             # If no data, client has disconnected
             if not data:
                 break
+            
+            if data.startswith("INITIALS:"):
+                initials = data.split(":", 1)[1].strip().strip(";")
+                with leaderboard_lock:
+                    player_initials[player_side] = initials
+                print(f"Player on side {player_side} set initials to {initials}")
 
+                continue  # don't try to parse as game update
+            
             if data.startswith("REPLAY"):
                 print(f"Replay requested by {player_side}")
 
@@ -117,6 +195,7 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
                     ballX = screenWidth // 2
                     ballY = screenHeight // 2
                     sync = 0
+                    winner_recorded = False
 
                 # Tell both clients to START the new round
                 for c, _ in clients:
@@ -132,6 +211,7 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
             clientLScore = int(clientLScore)
             clientRScore = int(clientRScore)
             clientSync = int(clientSync)
+
 
             # Update game state
             with stateLock:
@@ -152,6 +232,18 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
                     # Check for game over condition
                     if lScore > 4 or rScore > 4:
                         game_running = False
+                        
+                        if not winner_recorded:
+                            winner_recorded = True
+
+                            winner_side = "left" if lScore > rScore else "right"
+                            winner_initials = player_initials.get(winner_side, winner_side)
+
+                            lb = load_leaderboard()
+                            lb[winner_initials] = lb.get(winner_initials, 0) + 1
+                            save_leaderboard(lb)
+
+
 
             # Broadcast updated state to all clients
             broadcast_state()

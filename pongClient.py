@@ -66,7 +66,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
     if playerPaddle == "left":
         opponentPaddleObj = rightPaddle
         playerPaddleObj = leftPaddle
-    elif playerPaddle == 'right':
+    elif playerPaddle == "right":
         opponentPaddleObj = leftPaddle
         playerPaddleObj = rightPaddle
     else:
@@ -294,7 +294,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 # the screen width, height and player paddle (either "left" or "right")
 # If you want to hard code the screen's dimensions into the code, that's fine, but you will need to know
 # which client is which
-def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
+def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk, initials:str) -> None:
     # Purpose:      This method is fired when the join button is clicked
     # Arguments:
     # ip            A string holding the IP address of the server
@@ -307,6 +307,10 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client.connect((ip, int(port)))
+
+        if initials:
+            client.sendall(f"INITIALS:{initials};".encode())
+            
     except Exception as e:
         errorLabel.config(text=f"Could not connect to server at {ip}:{port}. Error: {e}")
         errorLabel.update()
@@ -391,11 +395,18 @@ def startScreen():
     portEntry = tk.Entry(app)
     portEntry.grid(column=1, row=2)
 
+    initialsLabel = tk.Label(text="Your Initials:")
+    initialsLabel.grid(column=0, row=3, sticky="w", padx=8)
+
+    initialsEntry = tk.Entry(app)
+    initialsEntry.grid(column=1, row=3)
+
     errorLabel = tk.Label(text="")
     errorLabel.grid(column=0, row=4, columnspan=2)
 
-    joinButton = tk.Button(text="Join", command=lambda: joinServer(ipEntry.get(), portEntry.get(), errorLabel, app))
-    joinButton.grid(column=0, row=3, columnspan=2)
+    joinButton = tk.Button(text="Join", command=lambda: joinServer(ipEntry.get(), portEntry.get(), errorLabel, app, 
+                                                                   initialsEntry.get().strip().upper()))
+    joinButton.grid(column=0, row=4, columnspan=2)
 
     app.mainloop()
 
