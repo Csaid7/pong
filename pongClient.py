@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors:	    Nathan Garrison
 # Email Addresses:          nathan.garrison@uky.edu
-# Date:                     11/19/2025
+# Date:                     11/23/2025
 # Purpose:                  This script is the client for a multiplayer pong game that connects to a server.
 # Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
@@ -18,6 +18,20 @@ from assets.code.helperCode import *
 # to suit your needs.
 def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
     
+    # Global game state variables (will be updated from server, just making sure they have values to begin)
+    oppPaddleY = 0
+    ballX = screenWidth // 2
+    ballY = screenHeight // 2
+    lScore = 0
+    rScore = 0
+    sync = 0
+
+    # Track if current game has ended
+    game_over = False
+
+    # Track if player wants to play again
+    requested_replay = False
+
     # Pygame inits
     pygame.mixer.pre_init(44100, -16, 2, 2048)
     pygame.init()
@@ -48,17 +62,23 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 
     ball = Ball(pygame.Rect(screenWidth/2, screenHeight/2, 5, 5), -5, 0)
 
+    # Determine which paddle is the player and which is the opponent
     if playerPaddle == "left":
         opponentPaddleObj = rightPaddle
         playerPaddleObj = leftPaddle
-    else:
+    elif playerPaddle == 'right':
         opponentPaddleObj = leftPaddle
         playerPaddleObj = rightPaddle
+    else:
+        # Spectator mode, no paddle control, set dummy paddles so code doesn't break
+        opponentPaddleObj = Paddle(pygame.Rect(0,0,0,0))
+        playerPaddleObj = Paddle(pygame.Rect(0,0,0,0))
 
-    lScore = 0
-    rScore = 0
+    # Buffer for incoming data
+    recv_buffer = ''
 
-    sync = 0
+    # Set socket to non-blocking mode
+    client.setblocking(False)
 
     while True:
         # Wiping the screen
@@ -70,11 +90,18 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 pygame.quit()
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_DOWN:
-                    playerPaddleObj.moving = "down"
+                # If game over, listen for play again (p key)
+                if game_over and event.key == pygame.K_p and not requested_replay:
+                    requested_replay = True # player pressed p
+                    client.sendall("REPLAY;".encode())
+                    print("Play again requested by this player")
+                # Else, then move paddle like normal
+                elif not game_over:
+                    if event.key == pygame.K_DOWN:
+                        playerPaddleObj.moving = "down"
 
-                elif event.key == pygame.K_UP:
-                    playerPaddleObj.moving = "up"
+                    elif event.key == pygame.K_UP:
+                        playerPaddleObj.moving = "up"
 
             elif event.type == pygame.KEYUP:
                 playerPaddleObj.moving = ""
@@ -84,8 +111,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # where the ball is and the current score.
         # Feel free to change when the score is updated to suit your needs/requirements
         
-        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
-        client.send(message.encode())
+        # Had to write message to be sent after ball logic to ensure ball starts moving first
         
         # =========================================================================================
 
@@ -98,13 +124,27 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 if paddle.rect.topleft[1] > 10:
                     paddle.rect.y -= paddle.speed
 
+        for paddle in [leftPaddle, rightPaddle]:
+            pygame.draw.rect(screen, WHITE, paddle)
+
         # If the game is over, display the win message
         if lScore > 4 or rScore > 4:
-            winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
-            textSurface = winFont.render(winText, False, WHITE, (0,0,0))
-            textRect = textSurface.get_rect()
-            textRect.center = ((screenWidth/2), screenHeight/2)
-            winMessage = screen.blit(textSurface, textRect)
+            # If score limit is reached, game over
+            if not game_over and (lScore > 4 or rScore > 4):
+                game_over = True # Used to stop ball movement
+            
+            # Show win message every frame while game is over
+            if game_over:
+                # Display who won and if players want to play again
+                winText = "Player 1 Wins! " if lScore > 4 else "Player 2 Wins! "
+                winText += "    Press P to play again"
+                textSurface = winFont.render(winText, False, WHITE, (0,0,0))
+                textRect = textSurface.get_rect()
+                textRect.center = ((screenWidth/2), screenHeight/2)
+                winMessage = screen.blit(textSurface, textRect)
+
+            # Stop all movement
+            playerPaddleObj.moving = ""
         else:
 
             # ==== Ball Logic =====================================================================
@@ -136,6 +176,10 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             pygame.draw.rect(screen, WHITE, ball)
             # ==== End Ball Logic =================================================================
 
+        # Send client's update to the server here
+        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
+        client.send(message.encode())
+
         # Drawing the dotted line in the center
         for i in centerLine:
             pygame.draw.rect(screen, WHITE, i)
@@ -147,7 +191,29 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         pygame.draw.rect(screen, WHITE, topWall)
         pygame.draw.rect(screen, WHITE, bottomWall)
         scoreRect = updateScore(lScore, rScore, screen, WHITE, scoreFont)
-        pygame.display.update([topWall, bottomWall, ball, leftPaddle, rightPaddle, scoreRect, winMessage])
+        pygame.display.update()
+
+        if game_over and requested_replay:
+            # Reset scores
+            lScore = 0
+            rScore = 0
+
+            # Reset paddles to starting position
+            playerPaddleObj.rect.y = paddleStartPosY
+            opponentPaddleObj.rect.y = paddleStartPosY
+
+            # Reset ball to center and serve left
+            ball.reset(nowGoing="left")
+
+            # Reset sync counter
+            sync = 0
+
+            # Reset flags
+            game_over = False
+            requested_replay = False
+
+            print("Starting new round")
+
         clock.tick(60)
         
         # This number should be synchronized between you and your opponent.  If your number is larger
@@ -158,16 +224,67 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         # Send your server update here at the end of the game loop to sync your game with your
         # opponent's game
 
-        data = client.recv(1024).decode()
-        if data:
-            oppPaddleY, ballX, ballY, leftScore, rightScore, syncNum = client.recv(1024).decode().split(",")
-            opponentPaddleObj.rect.y = int(oppPaddleY)
-            ball.rect.x = int(ballX)
-            ball.rect.y = int(ballY)
-            lScore = int(leftScore)
-            rScore = int(rightScore)
-            sync = int(syncNum)
+        try:
 
+            # Receive data from the server
+            data = client.recv(1024).decode()
+
+            if data:
+
+                # Append received data to buffer because client will read in multiple messages (START, updates, etc.))
+                recv_buffer += data
+
+                # Process all complete messages in the buffer
+                while ';' in recv_buffer:
+
+                    # Extract full message
+                    msg, recv_buffer = recv_buffer.split(';', 1)
+                    msg = msg.strip()
+
+                    # Skip empty messages
+                    if not msg:
+                        continue
+
+                    try:
+                        if msg == "START":
+                            game_over = False
+                            requested_replay = False
+                            
+                            # Reset all objects
+                            playerPaddleObj.rect.y = paddleStartPosY
+                            opponentPaddleObj.rect.y = paddleStartPosY
+                            ball.reset(nowGoing="left")
+
+                            lScore = 0
+                            rScore = 0
+                            sync = 0
+
+                            print("Received START — resetting local game state")
+                            continue   # IMPORTANT: skip further parsing
+
+                        # Parse the message from the server
+                        if playerPaddle == 'left' or playerPaddle == 'right':
+                            oppPaddleY, ballX, ballY, leftScore, rightScore, syncNum = msg.split(",")
+                            opponentPaddleObj.rect.y = int(oppPaddleY)
+                        else:
+                            leftY, rightY, ballX, ballY, leftScore, rightScore, syncNum = msg.split(",")
+                        
+                        # Update opponent paddle, ball position, and scores
+                        # If player is a spectator, set left/right paddle positions
+                        if playerPaddle not in ['left', 'right']:
+                            leftPaddle.rect.y = int(leftY)
+                            rightPaddle.rect.y = int(rightY)
+                        ball.rect.x = int(ballX)
+                        ball.rect.y = int(ballY)
+                        lScore = int(leftScore)
+                        rScore = int(rightScore)
+                        sync = int(syncNum)
+
+                    except:
+                        pass
+
+        except BlockingIOError:
+            pass
         # =========================================================================================
 
 
@@ -188,22 +305,67 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
     # Create a socket and connect to the server
     # You don't have to use SOCK_STREAM, use what you think is best
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((ip, int(port)))
+    try:
+        client.connect((ip, int(port)))
+    except Exception as e:
+        errorLabel.config(text=f"Could not connect to server at {ip}:{port}. Error: {e}")
+        errorLabel.update()
+        return
+
+    print("Connected to server, waiting for server to start...")
+
+    screenWidth = None
+    screenHeight = None
+    paddleSide = None
+    gameStarted = False
+    buffer = ''
+
+    client.setblocking(True)
+
+    while not gameStarted:
+        
+        # Receive data from the server
+        data = client.recv(1024).decode()
+
+        # If no data, server has disconnected
+        if not data:
+            continue
+
+        # Append received data to buffer
+        buffer += data
+
+        # Process all complete messages in the buffer
+        while ';' in buffer:
+
+            # Extract full message
+            msg, buffer = buffer.split(';', 1)
+            msg = msg.strip()
+
+            # Skip empty messages
+            if not msg:
+                continue
+
+            # Parse the message from the server
+            if msg == "START":
+                gameStarted = True
+                print("Game starting.")
+            elif "," in msg:
+                try:
+                    screenWidth, screenHeight, paddleSide = msg.split(",")
+                    screenWidth = int(screenWidth)
+                    screenHeight = int(screenHeight)
+                except:
+                    continue
     
-    # Get the required information from your server (screen width, height & player paddle, "left or "right)
-    info = client.recv(1024).decode()
-    screenWidth, screenHeight, paddleSide = info.split(",")
-    screenWidth = int(screenWidth)
-    screenHeight = int(screenHeight)
 
     # If you have messages you'd like to show the user use the errorLabel widget like so
-    errorLabel.config(text=f"Some update text. You input: IP: {ip}, Port: {port}")
+    errorLabel.config(text=f"Connected to server at {ip}:{port}. Starting game...")
     # You may or may not need to call this, depending on how many times you update the label
     errorLabel.update()     
 
     # Close this window and start the game with the info passed to you from the server
     app.withdraw()     # Hides the window (we'll kill it later)
-    playGame(screenWidth, screenHeight, ("left"|"right"), client)  # User will be either left or right paddle
+    playGame(screenWidth, screenHeight, paddleSide, client)  # User will be either left or right paddle
     app.quit()         # Kills the window
 
 
@@ -238,9 +400,8 @@ def startScreen():
     app.mainloop()
 
 if __name__ == "__main__":
-    #startScreen()
-    
+    startScreen()
     # Uncomment the line below if you want to play the game without a server to see how it should work
     # the startScreen() function should call playGame with the arguments given to it by the server this is
     # here for demo purposes only
-    playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))
+    #playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))

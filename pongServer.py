@@ -1,9 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    Caleb Mpungu
-# Email Addresses:          smp222@uky.edu
-# Date:                     11/19/2025
+# Contributing Authors:	    Caleb Mpungu, Naman Rao, Nathan Garrison
+# Email Addresses:          smp222@uky.edu, naman.rao@uky.edu, nathan.garrison@uky.edu
+# Date:                     11/23/2025
 # Purpose:                 Server that manages multiplayer pong game between two clients
-# Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
 # Synchronization 
@@ -19,15 +18,6 @@ import time
 # clients are and take actions to resync the games
 
 # Global Game State
-
-WIN_SCORE = 5 # points needed to win one game
-
-game_over = False # true when someone reaches WIN_SCORE
-winner = None # assign whoever reachs WIN_SCORE
-
-leftWantsReplay = False
-rightWantsReplay = False
-
 screenWidth = 640
 screenHeight = 480
 
@@ -37,311 +27,216 @@ rightPaddleY = 215   # Y position of right player's paddle (Player 2)
 
 # Ball state (starts in middle of screen)
 ballX = screenWidth // 2 
-ballY = screenWidth // 2
-
-# Velocity in X and Y direction
-ballVX = 5 
-ballVY = 3 
+ballY = screenHeight // 2
 
 # Scores
-leftScore = 0
-rightScore = 0
+lScore = 0
+rScore = 0
 
-# Paddle movement flags from clients (up, down, stop)
-leftMove = "stop"
-rightMove = "stop"
+# Sync variable to track game state updates
+sync = 0
 
-# Store client sockets
-leftClient = None
-rightClient = None
-# All connected client sockets (2 players + any spectators)
+# Store all connected client sockets (2 players + any spectators)
 clients = []
+client_sides = {}
 
 # Prevent threads writing at same time on a global variable
 stateLock = threading.Lock()
 
-game_running = True # Used to accept extra clients
+# Game running flag
+game_running = False
 
-# Update ball position (ballX, ballY) and scores (leftScore, rightScore), velocities, and paddle position
-# Execute client commands 
-def game_loop():
-    global leftPaddleY, rightPaddleY
-    global leftMove, rightMove
-    global ballX, ballY, ballVX, ballVY
-    global leftScore, rightScore
-
-    FPS = 60 # frames per second
-    frame_delay = 1.0 / FPS
-
-    while game_running:
-
-        # Game over when someones reaches win score
-        # Send game over message to all clients 
-        if game_over:
-            state_msg = f"GAME_OVER Winner={winner}"
-        
-        # Both players want to play again
-        if leftWantsReplay and rightWantsReplay:
-            # Reset game state
-            leftScore = 0
-            rightScore = 0
-
-            # Reset paddles
-            leftPaddleY = screenHeight // 2
-            rightPaddleY = screenHeight // 2
-
-            # Reset ball
-            ballX = screenWidth // 2
-            ballY = screenHeight // 2
-            ballVX = 5
-            ballVY = 3
-
-            # Reset replay flags
-            leftWantsReplay = False
-            rightWantsReplay = False
-
-            # Clear game over flag and reset winner
-            game_over = False
-            winner = None
-
-            print("Restarting game...")
-
-            # Slight transition
-            time.sleep(0.5)
-
-        
-        try:
-            # send to all connected clients
-            with stateLock:
-                current_clients = list(clients)
-            
-            # remove dead sockets
-            for c in current_clients:
-                # if send successful, then connection is alive
-                try:
-                    c.sendall(state_msg.encode())
-                except Exception:
-                    # remove dead client
-                    with stateLock:
-                        if c in clients:
-                            clients.remove(c)
-
-                    c.close()
-        
-        except Exception as e:
-            print("Error sending GAME_OVER: ", e)
-            game_running = False
-            break
-
-        time.sleep(frame_delay)
-
-        # Update paddle movement
-        # Y coordinate STARTS at top, so going up will decrease coords, and vice versa
-        with stateLock:
-            paddle_speed = 5 # pixels per frame
-
-            # left paddle
-            if leftMove == "up":
-                leftPaddleY -= paddle_speed
-            elif leftMove == "down":
-                leftPaddleY += paddle_speed
-            
-            # right paddle
-            if rightMove == "up":
-                rightPaddleY -= paddle_speed
-            elif rightMove == "down":
-                rightPaddleY += paddle_speed
-            
-            # Keep paddles in screen bounds
-            # Can't go above 0 (top bounds), can't go below screenheight including paddle pixels of 50
-            # Worse case scenario paddle position at y is top or bottom bound (including paddle)
-            leftPaddleY = max(0, min(screenHeight - 50, leftPaddleY))
-            rightPaddleY = max(0, min(screenHeight - 50, rightPaddleY))
-
-            # Update ball position
-            ballX += ballVX
-            ballY += ballVY
-
-            # Wall colisions
-            # Reverse direction off top or bottom bound
-            if ballY <= 0 or ballY >= screenHeight:
-                ballVY *= -1
-            
-            # Left / Right Scoring
-            if ballX < 0:
-                rightScore += 1 # right scored
-                ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
-                ballVX = abs(ballVX) # serve to right 
-
-                # Check win condition
-                if rightScore >= WIN_SCORE: # Case: score quickly after WIN_SCORE (>=)
-                    game_over = True
-                    winner = "Right"
-
-            if ballX > screenWidth:
-                leftScore += 1 # left scored
-                ballX, ballY = screenWidth // 2, screenHeight // 2 # reset to middle of screen
-                ballVX = -abs(ballVX) # serve to left
-
-                if leftScore >= WIN_SCORE:
-                    game_over = True
-                    winner = "Left"
-            
-            # Paddle collisions
-            paddle_width = 10
-            paddle_height = 50
-
-            leftPaddleX = 20 # left edge of paddle 
-            rightPaddleX = screenWidth - 20 - paddle_width # not totally against wall 
-
-            # Is ball touching at the paddle x coordinate including its width and is it within the screen bounds
-            # collision with left paddle
-            if (ballX <= leftPaddleX + paddle_width and 
-                leftPaddleY <= ballY <= leftPaddleY + paddle_height):
-                ballVX = abs(ballVX) # bounce ball back in opposite direction
-            
-            # collision with right paddle
-            if (ballX >= rightPaddleX - paddle_width and
-                rightPaddleY <= ballY <= rightPaddleY + paddle_height):
-                ballVX = -abs(ballVX) # bounce ball back in opposite direction
-            
-            # make a string of the current game state
-            state_msg = (
-                f"LPad={leftPaddleY} RPad={rightPaddleY}"
-                f"BallX={ballX} BallY={ballY} VX={ballVX} VY={ballVY}"
-                f"LScore={leftScore} RScore={rightScore}"
-            )
-
-            # update both clients on encoded game state, if clients exist
-            try:
-                # make copy of all sockets, used to remove dead sockets
-                with stateLock:
-                    current_clients = list(clients)
-                
-                # remove dead sockets
-                for c in current_clients:
-                    # if send successful, then connection is alive
-                    try:
-                        c.sendall(state_msg.encode())
-                    except Exception:
-                        # remove dead client
-                        with stateLock:
-                            if c in clients:
-                                clients.remove(c)
-                        c.close()
-                        print("Removed a disconnected client")
-            except Exception as e:
-                print("Error broadcasting state: ", e)
-                game_running = False
-                break
-                                           
+# Store paddle positions
+paddles = {}
 
 
 
-
-#Handles communcation witht he left player
-#updates leftpaddle based on the data and sends to rightpaddle
-
-def handleLeftClient(client_socket):
-    global leftMove, game_running
-    try:
-        # if something fails, make game stop by setting to false
-        while game_running:
-            #receives position from left player
-            data = client_socket.recv(1024)
-            #disconnect if not recieved
-            if not data:
-                game_running = False
-                break
-            #update the left paddle's position
-            leftMove = data.decode().strip()
-
-            # game has ended, left player wants to play again
-            if leftMove == "PLAY_AGAIN":
-                leftWantsReplay = True
-                print("Left player wants to play again")
-                continue
-    except:
-        game_running = False
-    finally:
-        client_socket.close()
+# Broadcast updates to all clients
+def broadcast_state() -> None:
     
-def handleRightClient(client_socket):
-    global rightMove, game_running
-    try:
-        # if something fails, make game stop by setting to false
-        while game_running:
-            #receives position from left player
-            data = client_socket.recv(1024)
-            #disconnect if not recieved
-            if not data:
-                game_running = False
-                break
-            #update the left paddle's position
-            rightMove = data.decode().strip()
+    global ballX, ballY, lScore, rScore, sync, paddles
 
-            # game has ended, right player wants to play again
-            if rightMove == "PLAY_AGAIN":
-                rightWantsReplay = True
-                print("Right player wants to play again")
+    # Send each client the opponent paddle position, ball position, scores, and sync value
+    with stateLock:
+
+        # Iterate through all connected clients
+        for client_socket, side in clients:
+
+            try:
+
+                # Determine opponent paddle position for each player
+                if side == 'left':
+                    oppPaddleY = paddles.get('right', screenHeight // 2 - 25)
+                    message = f'{oppPaddleY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                elif side == 'right':
+                    oppPaddleY = paddles.get('left', screenHeight // 2 - 25)
+                    message = f'{oppPaddleY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                # Spectators get both paddle positions but can't control either,
+                # sends a special message to spectator clients
+                elif side == 'spectator':
+                    leftY = paddles.get('left', screenHeight // 2 - 25)
+                    rightY = paddles.get('right', screenHeight // 2 - 25)
+                    message = f'{leftY},{rightY},{ballX},{ballY},{lScore},{rScore},{sync};'
+
+                # Send message to client
+                client_socket.send(message.encode())
+
+            # If sending fails, skip this client
+            except:
                 continue
-    except:
-        game_running = False
+
+
+
+# Handle individual client connection
+def handle_client(client_socket: socket.socket, player_side: str) -> None:
+
+    global paddles, ballX, ballY, lScore, rScore, sync, game_running
+
+    # Initialize paddle position for this player
+    paddles[player_side] = screenHeight // 2 - 25
+
+    try:
+        # Start game when both players are connected
+        while True:
+
+            # Wait for data from client
+            data = client_socket.recv(1024).decode()
+
+            # If no data, client has disconnected
+            if not data:
+                break
+
+            if data.startswith("REPLAY"):
+                print(f"Replay requested by {player_side}")
+
+                with stateLock:
+                    lScore = 0
+                    rScore = 0
+                    ballX = screenWidth // 2
+                    ballY = screenHeight // 2
+                    sync = 0
+
+                # Tell both clients to START the new round
+                for c, _ in clients:
+                    c.sendall("START;".encode())
+
+                continue    # skip rest of loop for this message
+
+            # Parse received data
+            paddleY, clientBallX, clientBallY, clientLScore, clientRScore, clientSync = data.split(',')
+            paddleY = int(paddleY)
+            clientBallX = int(clientBallX)
+            clientBallY = int(clientBallY)
+            clientLScore = int(clientLScore)
+            clientRScore = int(clientRScore)
+            clientSync = int(clientSync)
+
+            # Update game state
+            with stateLock:
+
+                # Update this player's paddle position
+                paddles[player_side] = paddleY
+
+                # Issues with desync if right client has higher sync, so only
+                # left client updates ball position and scores and right side just follows
+                if player_side == 'left':
+                    if clientSync >= sync:
+                        ballX = clientBallX
+                        ballY = clientBallY
+                        lScore = clientLScore
+                        rScore = clientRScore
+                        sync = clientSync
+
+                    # Check for game over condition
+                    if lScore > 4 or rScore > 4:
+                        game_running = False
+
+            # Broadcast updated state to all clients
+            broadcast_state()
+
+    except Exception as e:
+        print(f"Error handling client {player_side}: {e}")
+
     finally:
+
+        # Clean up on disconnect
         client_socket.close()
+
+        with stateLock:
+
+            # Remove client from list
+            clients[:] = [
+                (c, s) for c, s, in clients if c != client_socket
+            ]
+
+            # Remove paddle state
+            paddles.pop(player_side, None)
+
+
 
 # Server set up
-def start_server():
-    global leftClient, rightClient, clients
-    # Create a TCP/IP socket
-    # AF_INET = IPv4, SOCK_STREAM = TCP (reliable, connection-oriented)
-    server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    # Bind the socket to port 12345 on all available network interfaces
-    # '' means listen on all interfaces (localhost, network IP, etc.)
-    server.bind(("",12345))
-    # start listening for connection (any number of connections)
-    server.listen()
-    print("Waiting for players...")
-    #accpt first client connection (P1 - Left Paddle)
-    client1,addr1 = server.accept()
-    print(f"Player 1 connected from {addr1}")
-    clients.append(client1)
+def start_server(host: str, port: int) -> None:
 
-    client2, addr2 = server.accept()
-    print(f"Player 2 connected from {addr2}")
-    clients.append(client2)
-
-    # Create a thread to handle Player 1
-    # target = function to run
-    # .start() begins running the thread (doesn't wait for it to finish)
-    threading.Thread(target=handleLeftClient,args=(client1,)).start()
-
-    # Create a thread to handle Player 2
-    # Both threads now run simultaneously, each handling their own client
-    threading.Thread(target=handleRightClient,args=(client2,)).start()
-
-    # Start authoritative game loop
-    # daemon automatically stops program when threads exit
-    threading.Thread(target=game_loop, daemon=True).start() 
-
-    # accept extra clients (spectators) in the background
-    threading.Thread(target=accept_extra_clients, args=(server,), daemon=True).start()
-
-    print("Game loop started, accepting extra spectators")
-
-def accept_extra_clients(server_socket):
     global clients, game_running
 
-    while game_running:
-        try:
-            extra_client, extra_addr = server_socket.accept()
-            # lock state so clients aren't manipulated by multiple threads
-            with stateLock:
-                clients.append(extra_client)
-            print("Extra client connected from ", extra_addr)
+    # Create server socket
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((host, port))
+    server_socket.listen(5)
+    print(f'Server listening on IP: {host} and Port: {port}')
+
+    while True:
+
+        # Accept new client connection
+        client_socket, addr = server_socket.accept()
+        if len(clients) == 0:
+            side = 'left' 
+        elif len(clients) == 1:
+            side = 'right'
+        else:
+            side = 'spectator'
+
+        # Send initial game state to client
+        client_socket.sendall(f'{screenWidth},{screenHeight},{side};'.encode())
+        clients.append((client_socket, side))
+        print(f"Client connected from {addr} as {side}")
         
-        except Exception as e:
-            print(f"Error accepting extra client: {e}")
-            break
+        # Check if we can start the game
+        if not game_running:
+
+            # Check if both players are connected
+            player_sides = [s for _, s in clients]
+            if 'left' in player_sides and 'right' in player_sides:
+
+                # Both players connected, start the game
+                print("Two players connected. Game can start.")
+                game_running = True
+                for c, _ in clients:
+                    c.sendall("START;\n".encode())
+
+        # Start thread to handle this client
+        threading.Thread(
+            target = handle_client, 
+            args = (client_socket, side), 
+            daemon = True
+        ).start()
 
 
+
+# Reset game state for new round
+def reset_game() -> None:
+
+    global ballX, ballY, sync
+
+    # Reset ball position and sync for new round
+    ballX = screenWidth // 2
+    ballY = screenHeight // 2
+    sync = 0
+    print("Game reset for next round.")
+
+# Run server code listening on all IPs and port 5555 on startup
+if __name__ == "__main__":
+
+    start_server(host = '', port = 5555)
