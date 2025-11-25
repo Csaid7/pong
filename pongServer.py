@@ -18,23 +18,24 @@ import threading
 
 class LeaderboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        lb = load_leaderboard()
+        with leaderboard_lock:
+            lb = load_leaderboard()
 
-        html = "<html><body style='font-family: monospace; background: black; color: white;'>"
-        html += "<h1>Pong Leaderboard</h1><pre>"
+            html = "<html><body style='font-family: monospace; background: black; color: white;'>"
+            html += "<h1>Pong Leaderboard</h1><pre>"
 
-        if not lb:
-            html += "No wins recorded yet."
-        else:
-            for name, wins in lb.items():
-                html += f"{name}: {wins} wins\n"
+            if not lb:
+                html += "No wins recorded yet."
+            else:
+                for name, wins in lb.items():
+                    html += f"{name}: {wins} wins\n"
 
-        html += "</pre></body></html>"
+            html += "</pre></body></html>"
 
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(html.encode())
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(html.encode())
 
 def start_leaderboard_server():
     server = HTTPServer(("0.0.0.0", 80), LeaderboardHandler)
@@ -159,7 +160,7 @@ def broadcast_state() -> None:
 # Handle individual client connection
 def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
-    global paddles, ballX, ballY, lScore, rScore, sync, game_running, winner_recorded, player_initials
+    global paddles, ballX, ballY, lScore, rScore, sync, winner_recorded, player_initials
 
     with stateLock:
         player_initials[player_side] = ""
@@ -167,86 +168,117 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
     # Initialize paddle position for this player
     paddles[player_side] = screenHeight // 2 - 25
 
+    buffer = ""
+
     try:
         # Start game when both players are connected
         while True:
 
             # Wait for data from client
-            data = client_socket.recv(1024).decode()
+            chunk = client_socket.recv(1024).decode()
 
             # If no data, client has disconnected
-            if not data:
+            if not chunk:
                 break
+                
+            buffer += chunk
+
+            # Process all complete messages in the buffer
+            while ';' in buffer:
+                msg, buffer = buffer.split(';', 1)
+                msg = msg.strip()
+                if not msg:
+                    continue
             
-            if data.startswith("INITIALS:"):
-                initials = data.split(":", 1)[1].strip().strip(";")
-                with leaderboard_lock:
-                    player_initials[player_side] = initials
-                print(f"Player on side {player_side} set initials to {initials}")
-
-                continue  # don't try to parse as game update
+                if msg.startswith("INITIALS:"):
+                    initials = msg.split(":", 1)[1].strip().strip(";")
+                    with leaderboard_lock:
+                        player_initials[player_side] = initials
+                    print(f"Player on side {player_side} set initials to {initials}")
+                    continue  # don't treat as game update
             
-            if data.startswith("REPLAY"):
-                print(f"Replay requested by {player_side}")
+                if msg.startswith("REPLAY"):
+                    print(f"Replay requested by {player_side}")
+                
+                    with stateLock:
+                        # if (lScore > 4 or rScore > 4) and not winner_recorded:
+                        #     winner_recorded = True
+                        #     game_running = False
 
-                with stateLock:
-                    lScore = 0
-                    rScore = 0
-                    ballX = screenWidth // 2
-                    ballY = screenHeight // 2
-                    sync = 0
-                    winner_recorded = False
+                        #     winner_side = "left" if lScore > rScore else "right"
+                        #     winner_initials = player_initials.get(winner_side, winner_side)
 
-                # Tell both clients to START the new round
-                for c, _ in clients:
-                    c.sendall("START;".encode())
+                        #     with leaderboard_lock:
+                        #         lb = load_leaderboard()
+                        #         lb[winner_initials] = lb.get(winner_initials, 0) + 1
+                        #         save_leaderboard(lb)
 
-                continue    # skip rest of loop for this message
-
-            # Parse received data
-            paddleY, clientBallX, clientBallY, clientLScore, clientRScore, clientSync = data.split(',')
-            paddleY = int(paddleY)
-            clientBallX = int(clientBallX)
-            clientBallY = int(clientBallY)
-            clientLScore = int(clientLScore)
-            clientRScore = int(clientRScore)
-            clientSync = int(clientSync)
-
-
-            # Update game state
-            with stateLock:
-
-                # Update this player's paddle position
-                paddles[player_side] = paddleY
-
-                # Issues with desync if right client has higher sync, so only
-                # left client updates ball position and scores and right side just follows
-                if player_side == 'left':
-                    if clientSync >= sync:
-                        ballX = clientBallX
-                        ballY = clientBallY
-                        lScore = clientLScore
-                        rScore = clientRScore
-                        sync = clientSync
-
-                    # Check for game over condition
-                    if lScore > 4 or rScore > 4:
-                        game_running = False
-                        
                         if not winner_recorded:
-                            winner_recorded = True
+                            print("Replay ignored: game is still running.")
+                        else:
+                            lScore = 0
+                            rScore = 0
+                            ballX = screenWidth // 2
+                            ballY = screenHeight // 2
+                            sync = 0
 
+                            winner_recorded = False
+
+                            # Tell both clients to START the new round
+                            for c, _ in clients:
+                                c.sendall("START;".encode())
+
+                    continue    # skip rest of loop for this message
+
+                # Parse received data
+                try:
+                    paddleY, clientBallX, clientBallY, clientLScore, clientRScore, clientSync = msg.split(',')
+                except ValueError as e:
+                    print(f"Bad game update from {player_side}: {msg!r} ({e})")
+                    continue  # skip this bad message and keep listening
+
+                paddleY = int(paddleY)
+                clientBallX = int(clientBallX)
+                clientBallY = int(clientBallY)
+                clientLScore = int(clientLScore)
+                clientRScore = int(clientRScore)
+                clientSync = int(clientSync)
+
+
+                # Update game state
+                with stateLock:
+
+                    # Update this player's paddle position
+                    paddles[player_side] = paddleY
+
+                    # Issues with desync if right client has higher sync, so only
+                    # left client updates ball position and scores and right side just follows
+                    if player_side == 'left':
+                        if clientSync >= sync:
+                            ballX = clientBallX
+                            ballY = clientBallY
+                            lScore = clientLScore
+                            rScore = clientRScore
+                            sync = clientSync
+
+                        # Check for game over condition
+                        if (lScore > 4 or rScore > 4) and not winner_recorded:
+                            winner_recorded = True
+                            
                             winner_side = "left" if lScore > rScore else "right"
                             winner_initials = player_initials.get(winner_side, winner_side)
 
-                            lb = load_leaderboard()
-                            lb[winner_initials] = lb.get(winner_initials, 0) + 1
-                            save_leaderboard(lb)
+                            with leaderboard_lock:
+                                lb = load_leaderboard()
+                                lb[winner_initials] = lb.get(winner_initials, 0) + 1
+                                save_leaderboard(lb)
+                            
+                            print(f"Recorded win for {winner_initials} (lScore={lScore}, rScore={rScore})")
 
 
 
-            # Broadcast updated state to all clients
-            broadcast_state()
+                # Broadcast updated state to all clients
+                broadcast_state()
 
     except Exception as e:
         print(f"Error handling client {player_side}: {e}")

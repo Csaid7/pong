@@ -91,15 +91,15 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                 sys.exit()
             elif event.type == pygame.KEYDOWN:
                 # If game over, listen for play again (p key)
-                if game_over and event.key == pygame.K_p and not requested_replay:
+                if event.key == pygame.K_p and not requested_replay:
                     requested_replay = True # player pressed p
                     client.sendall("REPLAY;".encode())
                     print("Play again requested by this player")
+                
                 # Else, then move paddle like normal
                 elif not game_over:
                     if event.key == pygame.K_DOWN:
                         playerPaddleObj.moving = "down"
-
                     elif event.key == pygame.K_UP:
                         playerPaddleObj.moving = "up"
 
@@ -177,7 +177,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
             # ==== End Ball Logic =================================================================
 
         # Send client's update to the server here
-        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync}"
+        message = f"{playerPaddleObj.rect.y},{ball.rect.x},{ball.rect.y},{lScore},{rScore},{sync};"
         client.send(message.encode())
 
         # Drawing the dotted line in the center
@@ -193,26 +193,26 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
         scoreRect = updateScore(lScore, rScore, screen, WHITE, scoreFont)
         pygame.display.update()
 
-        if game_over and requested_replay:
-            # Reset scores
-            lScore = 0
-            rScore = 0
+        # if game_over and requested_replay:
+        #     # Reset scores
+        #     lScore = 0
+        #     rScore = 0
 
-            # Reset paddles to starting position
-            playerPaddleObj.rect.y = paddleStartPosY
-            opponentPaddleObj.rect.y = paddleStartPosY
+        #     # Reset paddles to starting position
+        #     playerPaddleObj.rect.y = paddleStartPosY
+        #     opponentPaddleObj.rect.y = paddleStartPosY
 
-            # Reset ball to center and serve left
-            ball.reset(nowGoing="left")
+        #     # Reset ball to center and serve left
+        #     ball.reset(nowGoing="left")
 
-            # Reset sync counter
-            sync = 0
+        #     # Reset sync counter
+        #     sync = 0
 
-            # Reset flags
-            game_over = False
-            requested_replay = False
+        #     # Reset flags
+        #     game_over = False
+        #     requested_replay = False
 
-            print("Starting new round")
+        #     print("Starting new round")
 
         clock.tick(60)
         
@@ -253,6 +253,7 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
                             # Reset all objects
                             playerPaddleObj.rect.y = paddleStartPosY
                             opponentPaddleObj.rect.y = paddleStartPosY
+
                             ball.reset(nowGoing="left")
 
                             lScore = 0
@@ -358,6 +359,7 @@ def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk, initials:str) -
                     screenWidth, screenHeight, paddleSide = msg.split(",")
                     screenWidth = int(screenWidth)
                     screenHeight = int(screenHeight)
+                    print("I am side:", paddleSide)
                 except:
                     continue
     
