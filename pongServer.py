@@ -1,7 +1,7 @@
 # =================================================================================================
 # Contributing Authors:	    Caleb Mpungu, Naman Rao, Nathan Garrison
 # Email Addresses:          smp222@uky.edu, naman.rao@uky.edu, nathan.garrison@uky.edu
-# Date:                     11/23/2025
+# Date:                     11/25/2025
 # Purpose:                 Server that manages multiplayer pong game between two clients
 # =================================================================================================
 
@@ -53,7 +53,11 @@ paddles = {}
 
 # Broadcast updates to all clients
 def broadcast_state() -> None:
-    
+    # Author: Nathan Garrison, Naman Rao, Caleb Mpungu
+    # Purpose: Send the current game state to all connected clients
+    # Pre: Global game state variables (paddles, ball, scores, sync) are initialized
+    # Post: Each client receives opponent paddle position, ball position, scores, and sync value
+
     global ballX, ballY, lScore, rScore, sync, paddles
 
     # Send each client the opponent paddle position, ball position, scores, and sync value
@@ -91,6 +95,10 @@ def broadcast_state() -> None:
 
 # Handle individual client connection
 def handle_client(client_socket: socket.socket, player_side: str) -> None:
+    # Author: Nathan Garrison, Naman Rao, Caleb Mpungu
+    # Purpose: Handles communication with a single client, updates game state, and broadcasts it
+    # Pre: Client socket is connected, player_side is assigned a side: ('left', 'right', or 'spectator')
+    # Post: Updates global paddle positions, ball position, scores, and sync. Removes client and paddle on disconnect
 
     global paddles, ballX, ballY, lScore, rScore, sync, game_running
 
@@ -162,6 +170,10 @@ def handle_client(client_socket: socket.socket, player_side: str) -> None:
 
 # Server set up
 def start_server(host: str, port: int) -> None:
+    # Author: Nathan Garrison, Naman Rao, Caleb Mpungu
+    # Purpose: Initialize server, accept clients, assign sides, start game, and spawn threads
+    # Pre: Host and port are valid; server can bind to socket
+    # Post: Server listens indefinitely, clients are handled in threads, game state updates continuously
 
     global clients, game_running
 
@@ -209,18 +221,6 @@ def start_server(host: str, port: int) -> None:
 
 
 
-# Reset game state for new round
-def reset_game() -> None:
-
-    global ballX, ballY, sync
-
-    # Reset ball position and sync for new round
-    ballX = screenWidth // 2
-    ballY = screenHeight // 2
-    sync = 0
-    print("Game reset for next round.")
-
 # Run server code listening on all IPs and port 5555 on startup
 if __name__ == "__main__":
-
     start_server(host = '', port = 5555)
