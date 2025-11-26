@@ -1,9 +1,8 @@
 # =================================================================================================
-# Contributing Authors:	    Nathan Garrison
-# Email Addresses:          nathan.garrison@uky.edu
-# Date:                     11/23/2025
+# Contributing Authors:	    Nathan Garrison, Caleb Mpungu, Naman Rao
+# Email Addresses:          nathan.garrison@uky.edu, smp222@uky.edu, naman.rao@uky.edu
+# Date:                     11/25/2025
 # Purpose:                  This script is the client for a multiplayer pong game that connects to a server.
-# Misc:                     <Not Required.  Anything else you might want to include>
 # =================================================================================================
 
 import pygame
@@ -17,7 +16,11 @@ from assets.code.helperCode import *
 # where you should add to the code are marked.  Feel free to change any part of this project
 # to suit your needs.
 def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.socket) -> None:
-    
+    # Author: Nathan Garrison, Caleb Mpungu, Naman Rao
+    # Purpose: Run the main Pong game loop for a client
+    # Pre: Client is connected to server, has received screen dimensions and player side
+    # Post: Updates paddle and ball positions, receives state from server, and renders game
+
     # Global game state variables (will be updated from server, just making sure they have values to begin)
     oppPaddleY = 0
     ballX = screenWidth // 2
@@ -237,12 +240,10 @@ def playGame(screenWidth:int, screenHeight:int, playerPaddle:str, client:socket.
 # If you want to hard code the screen's dimensions into the code, that's fine, but you will need to know
 # which client is which
 def joinServer(ip:str, port:str, errorLabel:tk.Label, app:tk.Tk) -> None:
-    # Purpose:      This method is fired when the join button is clicked
-    # Arguments:
-    # ip            A string holding the IP address of the server
-    # port          A string holding the port the server is using
-    # errorLabel    A tk label widget, modify it's text to display messages to the user (example below)
-    # app           The tk window object, needed to kill the window
+    # Author: Nathan Garrison, Caleb Mpungu, Naman Rao
+    # Purpose: Connects to the Pong server, receives initial game info, and launches the game loop
+    # Pre: IP and port are valid; Tkinter label and app are initialized
+    # Post: Client is connected to server, receives screenWidth, screenHeight, player side, and calls playGame
     
     # Create a socket and connect to the server
     # You don't have to use SOCK_STREAM, use what you think is best
@@ -343,7 +344,3 @@ def startScreen():
 
 if __name__ == "__main__":
     startScreen()
-    # Uncomment the line below if you want to play the game without a server to see how it should work
-    # the startScreen() function should call playGame with the arguments given to it by the server this is
-    # here for demo purposes only
-    #playGame(640, 480,"left",socket.socket(socket.AF_INET, socket.SOCK_STREAM))
