@@ -32,5 +32,5 @@ Run the following line to install the required libraries for this project:
 
 Known Bugs
 ==========
-- None
+- When connecting to client on Mac, updates do not send correctly, Windows client works fine, Mac client stays frozen on first frame of pygame.
 
